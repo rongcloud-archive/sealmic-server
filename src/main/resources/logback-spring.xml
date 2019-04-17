@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/base.xml" />
+    <springProfile name="dev">
+        <logger name="cn.rongcloud" level="INFO" additivity="false">
+            <appender-ref ref="CONSOLE" />
+            <appender-ref ref="FILE" />
+        </logger>
+    </springProfile>
+    <springProfile name="prod">
+        <logger name="cn.rongcloud" level="INFO" additivity="false">
+            <appender-ref ref="FILE" />
+        </logger>
+    </springProfile>
+</configuration>
