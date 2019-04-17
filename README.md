@@ -3,7 +3,6 @@
 ## 项目介绍
 * SealMic-Server 是基于 SpringBoot 框架实现
 * 依赖于 MySql 的数据存储，Redis 的数据缓存
-* 依赖白板服务，创建、销毁白板
 * 依赖融云 IM 服务，收发信令
 
 ## 使用方法
