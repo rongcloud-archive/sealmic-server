@@ -1,18 +1,17 @@
 package cn.rongcloud.service.Impl;
 
 import cn.rongcloud.common.*;
+import cn.rongcloud.config.IMProperties;
 import cn.rongcloud.config.RoomProperties;
 import cn.rongcloud.dao.*;
 import cn.rongcloud.im.IMHelper;
-import cn.rongcloud.im.message.MicPositionChangeMessage;
-import cn.rongcloud.im.message.MicPositionControlMessage;
-import cn.rongcloud.im.message.RoomBgNotifyMessage;
-import cn.rongcloud.im.message.RoomMemberChangedMessage;
+import cn.rongcloud.im.message.*;
 import cn.rongcloud.job.ScheduleManager;
 import cn.rongcloud.permission.DeclarePermissions;
 import cn.rongcloud.pojo.*;
 import cn.rongcloud.service.RoomService;
 import cn.rongcloud.utils.CheckUtils;
+import cn.rongcloud.utils.CodeUtil;
 import cn.rongcloud.utils.DateTimeUtils;
 import cn.rongcloud.utils.IdentifierUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +47,9 @@ public class RoomServiceImpl implements RoomService {
 
     @Autowired
     RoomProperties roomProperties;
+
+    @Autowired
+    private IMProperties imProperties;
 
     @Transactional
     @Override
@@ -145,19 +147,23 @@ public class RoomServiceImpl implements RoomService {
         CheckUtils.checkArgument(roomDao.existsByRid(roomId), "room not exist");
         log.info("leaveRoom: roomId={}, {}", roomId, jwtUser);
 
-        roomMemberDao.deleteByRidAndUid(roomId, jwtUser.getUserId());
+        return leaveRoom(roomId, jwtUser.getUserId());
+    }
 
-        RoomMicPositionInfo info = roomMicDao.findByRidAndUid(roomId, jwtUser.getUserId());
+    private Boolean leaveRoom(String roomId, String userId) throws Exception{
+        roomMemberDao.deleteByRidAndUid(roomId, userId);
+
+        RoomMicPositionInfo info = roomMicDao.findByRidAndUid(roomId, userId);
         if (info != null) {
             int state = info.getState() & (MicPositionState.Forbidden.getValue());
             roomMicDao.updateStateAndUidByRidAndPosition(roomId, info.getPosition(), state, null);
-            notifyMicControlMsg(roomId, info.getPosition(), MicPositionCmd.Down.ordinal(), jwtUser, jwtUser.getUserId());
+            notifyMicControlMsg(roomId, info.getPosition(), MicPositionCmd.Down.ordinal(), userId, userId);
         }
 
         RoomMemberChangedMessage msg = new RoomMemberChangedMessage();
         msg.setCmd(2);
-        msg.setTargetUserId(jwtUser.getUserId());
-        imHelper.publishMessage(jwtUser.getUserId(), roomId, msg, 1);
+        msg.setTargetUserId(userId);
+        imHelper.publishMessage(userId, roomId, msg, 1);
         return true;
     }
 
@@ -222,15 +228,21 @@ public class RoomServiceImpl implements RoomService {
 
     public Boolean destroyRoom(String roomId) throws Exception {
         log.info("destroyRoom: {}", roomId);
+        List<Room> roomList = roomDao.findByRid(roomId);
+        if (roomList.isEmpty()) return false;
+
         roomDao.deleteByRid(roomId);
         roomMicDao.deleteByRid(roomId);
         roomMemberDao.deleteByRid(roomId);
-        IMApiResultInfo resultInfo = imHelper.destroy(roomId);
-        if (resultInfo.isSuccess()) {
-            return true;
-        } else {
-            throw new ApiException(ErrorEnum.ERR_DESTROY_ROOM_ERROR);
-        }
+        RoomDestroyedNotifyMessage msg = new RoomDestroyedNotifyMessage();
+        imHelper.publishMessage(roomList.get(0).getCreatorUid(), roomId, msg, 1);
+//        IMApiResultInfo resultInfo = imHelper.destroy(roomId);
+//        if (resultInfo.isSuccess()) {
+//            return true;
+//        } else {
+//            throw new ApiException(ErrorEnum.ERR_DESTROY_ROOM_ERROR);
+//        }
+        return true;
     }
 
     @Transactional
@@ -266,9 +278,14 @@ public class RoomServiceImpl implements RoomService {
                 if (info.getUid() != null) {
                     throw new ApiException(ErrorEnum.ERR_MIC_POSITION_ERROR, "Position has been hold");
                 }
+                RoomMicPositionInfo positionInfo = roomMicDao.findByRidAndUid(roomId, targetUserId);
+                log.info("controlMic: {}, {}", roomId, positionInfo);
+                if (positionInfo != null) {
+                    throw new ApiException(ErrorEnum.ERR_MIC_POSITION_DUPLICATE_JOIN, "Exist in mic position");
+                }
                 int state = info.getState() | MicPositionState.Hold.getValue();
                 roomMicDao.updateStateAndUidByRidAndPosition(roomId, targetPosition, state, targetUserId);
-                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Carry.ordinal(), jwtUser, targetUserId);
+                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Carry.ordinal(), jwtUser.getUserId(), targetUserId);
                 break;
             case Kick:
                 if (info.getUid() == null) {
@@ -277,12 +294,12 @@ public class RoomServiceImpl implements RoomService {
                 state = info.getState() & (MicPositionState.Locked.getValue() | MicPositionState.Forbidden.getValue());
                 roomMicDao.updateStateAndUidByRidAndPosition(roomId, targetPosition, state,null);
                 roomMemberDao.deleteByRidAndUid(roomId, targetUserId);
-                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Kick.ordinal(), jwtUser, targetUserId);
+                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Kick.ordinal(), jwtUser.getUserId(), targetUserId);
                 break;
             case Lock:
                 state = info.getState() | MicPositionState.Locked.getValue();
                 roomMicDao.updateStateAndUidByRidAndPosition(roomId, targetPosition, state, null);
-                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Forbidden.ordinal(), jwtUser, targetUserId);
+                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Forbidden.ordinal(), jwtUser.getUserId(), targetUserId);
                 break;
             case Unlock:
                 if (info == null || (info.getState() & MicPositionState.Locked.getValue()) == 0) {
@@ -290,13 +307,13 @@ public class RoomServiceImpl implements RoomService {
                 } else {
                     state = info.getState() & MicPositionState.Forbidden.getValue();
                     roomMicDao.updateStateByRidAndPosition(roomId, targetPosition, state);
-                    notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Unlock.ordinal(), jwtUser, targetUserId);
+                    notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Unlock.ordinal(), jwtUser.getUserId(), targetUserId);
                 }
                 break;
             case Forbidden:
                 state = info.getState() | MicPositionState.Forbidden.getValue();
                 roomMicDao.updateStateByRidAndPosition(roomId, targetPosition, state);
-                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Forbidden.ordinal(), jwtUser, targetUserId);
+                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Forbidden.ordinal(), jwtUser.getUserId(), targetUserId);
                 break;
             case Unforbidden:
                 if (info == null || (info.getState() & MicPositionState.Forbidden.getValue()) == 0) {
@@ -304,7 +321,7 @@ public class RoomServiceImpl implements RoomService {
                 } else {
                     state = info.getState() & (MicPositionState.Locked.getValue()|MicPositionState.Hold.getValue());
                     roomMicDao.updateStateByRidAndPosition(roomId, targetPosition, state);
-                    notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Unforbidden.ordinal(), jwtUser, targetUserId);
+                    notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Unforbidden.ordinal(), jwtUser.getUserId(), targetUserId);
                 }
                 break;
             case Down:
@@ -313,7 +330,7 @@ public class RoomServiceImpl implements RoomService {
                 }
                 state = info.getState() & (MicPositionState.Forbidden.getValue());
                 roomMicDao.updateStateAndUidByRidAndPosition(roomId, targetPosition, state, null);
-                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Down.ordinal(), jwtUser, targetUserId);
+                notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Down.ordinal(), jwtUser.getUserId(), targetUserId);
                 break;
             default:
                 log.error("controlMic: unsupport the cmd: roomId={}, targetUserId={}, targetPosition={}, cmd={}, {}", roomId, targetUserId, targetPosition, micCmd, jwtUser);
@@ -379,7 +396,7 @@ public class RoomServiceImpl implements RoomService {
 
         roomMicDao.updateStateAndUidByRidAndPosition(roomId, targetPosition, info.getState() | MicPositionState.Hold.getValue(), jwtUser.getUserId());
         roomMemberDao.updateRoleByRidAndUid(roomId, jwtUser.getUserId(), RoleEnum.RoleConnector.getValue());
-        notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Up.ordinal(), jwtUser, jwtUser.getUserId());
+        notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Up.ordinal(), jwtUser.getUserId(), jwtUser.getUserId());
         return true;
     }
 
@@ -404,18 +421,18 @@ public class RoomServiceImpl implements RoomService {
         roomMicDao.updateUidByRidAndPosition(roomId, targetPosition, null);
         roomMemberDao.updateRoleByRidAndUid(roomId, jwtUser.getUserId(), RoleEnum.RoleAudience.getValue());
 
-        notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Down.ordinal(), jwtUser, jwtUser.getUserId());
+        notifyMicControlMsg(roomId, targetPosition, MicPositionCmd.Down.ordinal(), jwtUser.getUserId(), jwtUser.getUserId());
         return true;
     }
 
-    private void notifyMicControlMsg(String roomId, int targetPosition, int cmd, JwtUser jwtUser, String targetUserId) throws Exception {
+    private void notifyMicControlMsg(String roomId, int targetPosition, int cmd, String fromUserId, String targetUserId) throws Exception {
         List<RoomMicPositionInfo> micPositionInfoList = roomMicDao.findByRidOrderAsc(roomId);
         MicPositionControlMessage msg = new MicPositionControlMessage();
         msg.setTargetUserId(targetUserId);
         msg.setCmd(cmd);
         msg.setTargetPosition(targetPosition);
         msg.setMicPositions(micPositionInfoList);
-        imHelper.publishMessage(jwtUser.getUserId(), roomId, msg, 1);
+        imHelper.publishMessage(fromUserId, roomId, msg, 1);
     }
 
     @Override
@@ -450,5 +467,50 @@ public class RoomServiceImpl implements RoomService {
         RoomBgNotifyMessage msg = new RoomBgNotifyMessage(bgId);
         imHelper.publishMessage(jwtUser.getUserId(), roomId, msg, 1);
         return true;
+    }
+
+    @Override
+    public Boolean memberOnlineStatus(List<ReqMemberOnlineStatus> statusList, String nonce, String timestamp, String signature) throws ApiException, Exception {
+        String sign = imProperties.getSecret() + nonce + timestamp;
+        String signSHA1 = CodeUtil.hexSHA1(sign);
+        if (!signSHA1.equals(signature)) {
+            log.info("memberOnlineStatus signature error");
+            return true;
+        }
+
+        for (ReqMemberOnlineStatus status : statusList) {
+            int s = Integer.parseInt(status.getStatus());
+            String userId = status.getUserId();
+
+            log.info("memberOnlineStatus, userId={}, status={}", userId, status);
+            //1：offline 离线； 0: online 在线
+            if (s == 1) {
+                List<RoomMember> members = roomMemberDao.findByUid(userId);
+                if (!members.isEmpty()) {
+                    scheduleManager.userIMOffline(userId);
+                }
+            } else if (s == 0) {
+                scheduleManager.userIMOnline(userId);
+            }
+        }
+
+        return true;
+    }
+
+    @Override
+    public void userIMOfflineKick(String userId) {
+        List<RoomMember> members = roomMemberDao.findByUid(userId);
+        for (RoomMember member : members) {
+            int userRole = member.getRole();
+            log.info("userIMOfflineKick: roomId={}, {}, role={}", member.getRid(), userId, RoleEnum.getEnumByValue(userRole));
+            try {
+                leaveRoom(member.getRid(), userId);
+                if (member.getRole() == RoleEnum.RoleAssistant.getValue()) {
+                    destroyRoom(member.getRid());
+                }
+            } catch (Exception e) {
+                log.error("userIMOfflineKick error: userId={}", userId);
+            }
+        }
     }
 }

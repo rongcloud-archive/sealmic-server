@@ -2,6 +2,7 @@ package cn.rongcloud.service;
 
 import cn.rongcloud.common.ApiException;
 import cn.rongcloud.common.JwtUser;
+import cn.rongcloud.pojo.ReqMemberOnlineStatus;
 import cn.rongcloud.pojo.RoomResult;
 import cn.rongcloud.pojo.RoomBaseResult;
 
@@ -35,4 +36,7 @@ public interface RoomService {
     public List<RoomResult.AudienceResult> getMembers(String roomId, JwtUser jwtUser) throws Exception;
 
     public Boolean setBackground(String roomId, int bgId, JwtUser jwtUser) throws Exception;
+
+    public Boolean memberOnlineStatus(List<ReqMemberOnlineStatus> statusList, String nonce, String timestamp, String signature) throws ApiException, Exception;
+    public void userIMOfflineKick(String userId);
 }

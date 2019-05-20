@@ -15,4 +15,5 @@ public class RoomProperties {
     private long delayTtl;
     private int posCount;
     private int maxMember;
+    private long userIMOfflineKickTtl;
 }

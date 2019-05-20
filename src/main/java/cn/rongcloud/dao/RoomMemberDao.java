@@ -18,6 +18,8 @@ public interface RoomMemberDao extends JpaRepository<RoomMember, Long> {
 
     public List<RoomMember> findByRidAndUid(String rid, String uid);
 
+    public List<RoomMember> findByUid(String uid);
+
     public int countByRid(String rid);
 
     @Transactional

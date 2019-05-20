@@ -28,6 +28,7 @@ public enum ErrorEnum {
     ERR_MIC_POSITION_LOCKED(25, "Mic position locked"),
     ERR_ROOM_OVER_MAX_COUNT(26, "Room count over max"),
     ERR_ROOM_MEMBER_OVER_MAX_COUNT(27, "Room member count over max"),
+    ERR_MIC_POSITION_DUPLICATE_JOIN(28, "Duplicated join mic position"),
     ;
 
     private @Getter int errCode;

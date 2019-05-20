@@ -108,4 +108,14 @@ public class RoomController {
         boolean result = roomService.setBackground(data.getRoomId(), data.getBgId(), jwtUser);
         return new BaseResponse<>(result);
     }
+
+    @RequestMapping(value = "/members/online-status", method = RequestMethod.POST)
+    public BaseResponse<Boolean> memberOnlineStatus(@RequestBody List<ReqMemberOnlineStatus> statusList,
+                                                    @RequestParam(value = "timestamp", required = false) String timestamp,
+                                                    @RequestParam(value = "nonce", required = false) String nonce,
+                                                    @RequestParam(value = "signature", required = false) String signature)
+            throws ApiException, Exception {
+        Boolean result = roomService.memberOnlineStatus(statusList, nonce, timestamp, signature);
+        return new BaseResponse<>(result);
+    }
 }
