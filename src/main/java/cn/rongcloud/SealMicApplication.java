@@ -3,13 +3,13 @@ package cn.rongcloud;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.EnableAspectJAutoProxy;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.boot.web.servlet.ServletComponentScan;
+import org.springframework.scheduling.annotation.EnableAsync;
 
-@EnableAspectJAutoProxy
+@SpringBootApplication(scanBasePackages = {"cn.rongcloud"})
+@ServletComponentScan
+@EnableAsync
 @Slf4j
-@SpringBootApplication
-@EnableScheduling
 public class SealMicApplication {
 
 	public static void main(String[] args) {
